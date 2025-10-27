@@ -15,7 +15,7 @@ df = preprocessor.preprocess(df, region_df)
 st.sidebar.title("Olympics Analysis")
 user_menu = st.sidebar.radio(
     'Select option',
-    ('Medal Tally','Overall Analysis','Country-wise Analytics','Athlete-wise Analysis')
+    ('Medal Tally','Overall Analysis','Country-wise Analytics','Athlete-wise Analysis','Country Comparison')
 )
 
 if user_menu == 'Medal Tally':
@@ -26,8 +26,19 @@ if user_menu == 'Medal Tally':
     selected_country = st.sidebar.selectbox("Select Country", country)
 
     medal_tally = helper.fetch_medal_tally(df, selected_year, selected_country)
+
     if selected_year == 'Overall' and selected_country == 'Overall':
         st.title('Overall Tally')
+        st.header("Global Medal Distribution Map")
+        fig = px.choropleth(medal_tally,
+                            locations='region',
+                            locationmode='country names',
+                            color='total',
+                            hover_name='region',
+                            hover_data=['Gold', 'Silver', 'Bronze'],  # Shows medal breakdown on hover
+                            color_continuous_scale=px.colors.sequential.Plasma,
+                            title='Overall Olympic Medals by Country')
+        st.plotly_chart(fig, use_container_width=True)
     if selected_year != 'Overall' and selected_country == 'Overall':
         st.title("Medal Tally in " + str(selected_year) + " Olympics")
     if selected_year == 'Overall' and selected_country != 'Overall':
@@ -94,8 +105,11 @@ if user_menu == 'Overall Analysis':
     sport_list.sort()
     sport_list.insert(0,'Overall')
 
-    selected_sport = st.selectbox("Select Sport", sport_list)
-    x = helper.most_successful(df,selected_sport)
+    selected_sport = st.selectbox("Select Sport", sport_list, key='overall_athletes_sport')
+
+    top_n = st.sidebar.slider('Select Number of Athletes', 5, 25, 10)
+
+    x = helper.most_successful(df,selected_sport,top_n)
     st.table(x)
 
 if user_menu == 'Country-wise Analytics':
@@ -118,8 +132,9 @@ if user_menu == 'Country-wise Analytics':
     ax = sns.heatmap(pt,annot=True)
     st.pyplot(fig)
 
-    st.title("Top 10 athletes of "+selected_country)
-    top10_df = helper.most_successful_countrywise(df,selected_country)
+    st.title("Top athletes of "+selected_country)
+    top_n_country = st.sidebar.slider('Select Number of Athletes', 5, 15, 10, key='country_slider')
+    top10_df = helper.most_successful_countrywise(df,selected_country,top_n_country)
     st.table(top10_df)
 
 if user_menu == 'Athlete-wise Analysis':
@@ -135,6 +150,26 @@ if user_menu == 'Athlete-wise Analysis':
     fig.update_layout(autosize=False,width=1000,height=600)
     st.title("Distribution of Age")
     st.plotly_chart(fig)
+
+    #NEW CODE
+    st.title("Age Distribution for Gold Medalists by Sport")
+
+    sport_list = df['Sport'].unique().tolist()
+    sport_list.sort()
+    selected_sports = st.multiselect("Select Sports to Compare", sport_list,
+                                     default=['Athletics', 'Swimming', 'Gymnastics'])
+    if selected_sports:
+        # Filter the data for Gold medalists in the selected sports
+        gold_medalists_age_df = athlete_df[
+            (athlete_df['Medal'] == 'Gold') & (athlete_df['Sport'].isin(selected_sports))]
+
+        # Create a box plot to show the distribution
+        fig = px.box(gold_medalists_age_df, x='Sport', y='Age',
+                     title="Age Distribution of Gold Medalists",
+                     labels={'Sport': 'Sport', 'Age': 'Age of Gold Medalist'},
+                     points="all")  # 'all' shows the individual data points
+        st.plotly_chart(fig)
+    #NEW CODE
 
     x=[]
     name = []
@@ -168,3 +203,31 @@ if user_menu == 'Athlete-wise Analysis':
     final = helper.men_vs_women(df)
     fig = px.line(final,x="Year",y=["Male","Female"])
     st.plotly_chart(fig)
+
+if user_menu == 'Country Comparison':
+    st.sidebar.title('Country Comparison')
+
+    country_list = df['region'].dropna().unique().tolist()
+    country_list.sort()
+
+    st.title("Head-to-Head Country Medal Comparison")
+
+    country1 = st.sidebar.selectbox("Select Country 1", country_list)
+    country2 = st.sidebar.selectbox("Select Country 2", country_list)
+
+    if country1 and country2:
+        if country1 == country2:
+            st.warning("Please select two different countries.")
+        else:
+            comparison_df = helper.country_comparison_data(df, country1, country2)
+
+            # Ensure both countries are in the columns, even if one has 0 medals overall
+            if country1 not in comparison_df.columns:
+                comparison_df[country1] = 0
+            if country2 not in comparison_df.columns:
+                comparison_df[country2] = 0
+
+            fig = px.line(comparison_df, x=comparison_df.index, y=[country1, country2],
+                          title=f"Medal Tally Comparison: {country1} vs {country2}",
+                          labels={'value': 'Number of Medals', 'Year': 'Olympic Year'})
+            st.plotly_chart(fig)

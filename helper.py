@@ -47,13 +47,13 @@ def data_over_time(df,col):
     nations_over_time.rename(columns={'Year':'Year','count':col}, inplace=True)
     return nations_over_time
 
-def most_successful(df, sport):
+def most_successful(df, sport,top_n=15):
     temp_df = df.dropna(subset = ['Medal'])
 
     if sport != 'Overall':
         temp_df = temp_df[temp_df['Sport'] == sport]
 
-    x = temp_df['Name'].value_counts().reset_index().head(15).merge(df,left_on='Name',right_on='Name',how='left')[['Name','count','Sport','region']].drop_duplicates('Name')
+    x = temp_df['Name'].value_counts().reset_index().head(top_n).merge(df,left_on='Name',right_on='Name',how='left')[['Name','count','Sport','region']].drop_duplicates('Name')
     x.rename(columns={'count':'Medals','region':'Country'},inplace = True)
     return x
 
@@ -75,12 +75,12 @@ def country_event_heatmap(df,country):
     pt = new_df.pivot_table(index='Sport', columns='Year', values='Medal', aggfunc='count').fillna(0)
     return pt
 
-def most_successful_countrywise(df, country):
+def most_successful_countrywise(df, country,top_n=10):
     temp_df = df.dropna(subset = ['Medal'])
 
     temp_df = temp_df[temp_df['region'] == country]
 
-    x = temp_df['Name'].value_counts().reset_index().head(10).merge(df,left_on='Name',right_on='Name',how='left')[['Name','count','Sport']].drop_duplicates('Name')
+    x = temp_df['Name'].value_counts().reset_index().head(top_n).merge(df,left_on='Name',right_on='Name',how='left')[['Name','count','Sport']].drop_duplicates('Name')
     x.rename(columns={'count':'Medals'},inplace = True)
     return x
 
@@ -104,3 +104,13 @@ def men_vs_women(df):
     final.fillna(0, inplace=True)
 
     return final
+
+
+def country_comparison_data(df, country1, country2):
+    temp_df = df[df['region'].isin([country1, country2])]
+
+    comparison_df = temp_df.groupby(['Year', 'region'])['Medal'].count().reset_index()
+
+    comparison_df = comparison_df.pivot(index='Year', columns='region', values='Medal').fillna(0).astype(int)
+
+    return comparison_df
