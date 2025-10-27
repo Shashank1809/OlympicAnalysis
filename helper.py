@@ -1,4 +1,10 @@
 import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
 
 def fetch_medal_tally(df, year, country):
     medal_df = df.drop_duplicates(subset=['Team', 'NOC', 'Games', 'Year', 'City', 'Sport', 'Event', 'Medal'])
@@ -114,3 +120,117 @@ def country_comparison_data(df, country1, country2):
     comparison_df = comparison_df.pivot(index='Year', columns='region', values='Medal').fillna(0).astype(int)
 
     return comparison_df
+
+
+# --- Add these new functions to helper.py ---
+
+def country_medal_breakdown(df, country1, country2):
+    """
+    Prepares data for the G/S/B medal breakdown grouped bar chart.
+    """
+    # We use the main df which has one-hot encoded medals
+    temp_df = df[df['region'].isin([country1, country2])]
+
+    # Group by region and sum the medal columns
+    breakdown = temp_df.groupby('region')[['Gold', 'Silver', 'Bronze']].sum().reset_index()
+
+    # Melt the DataFrame to make it compatible with Plotly express
+    melted_df = breakdown.melt(id_vars='region', value_vars=['Gold', 'Silver', 'Bronze'],
+                               var_name='Medal', value_name='Count')
+    return melted_df
+
+
+def country_gender_medals(df, country1, country2):
+    """
+    Prepares data for the gender-based medal comparison bar chart.
+    """
+    temp_df = df[df['region'].isin([country1, country2])]
+
+    # Filter for rows that actually have a medal
+    temp_df = temp_df.dropna(subset=['Medal'])
+
+    # Group by region and sex, then count the number of medals
+    gender_df = temp_df.groupby(['region', 'Sex'])['Medal'].count().reset_index()
+    return gender_df
+
+
+def country_top_sports(df, country1, country2):
+    """
+    Prepares data for the top sports comparison horizontal bar chart.
+    """
+    temp_df = df[df['region'].isin([country1, country2])]
+    temp_df = temp_df.dropna(subset=['Medal'])
+
+    # Group by region and Sport, counting medals
+    sports_df = temp_df.groupby(['region', 'Sport'])['Medal'].count().reset_index()
+
+    # Find the top 10 sports for Country 1
+    top_10_c1 = sports_df[sports_df['region'] == country1].nlargest(10, 'Medal')['Sport'].tolist()
+    # Find the top 10 sports for Country 2
+    top_10_c2 = sports_df[sports_df['region'] == country2].nlargest(10, 'Medal')['Sport'].tolist()
+
+    # Create a union of both lists to get all relevant sports
+    top_sports_union = list(set(top_10_c1) | set(top_10_c2))
+
+    # Filter the grouped data to only include these top sports
+    final_df = sports_df[sports_df['Sport'].isin(top_sports_union)]
+
+    return final_df
+
+
+def train_prediction_model(df):
+    """
+    Trains a model to predict medal success.
+    Returns the trained pipeline and lists of unique sports and regions.
+    """
+    # 1. Feature Engineering: Create the target variable
+    model_df = df.copy()
+    # Create a binary target: 1 if athlete won a medal, 0 if not
+    model_df['Medal_Won'] = model_df['Medal'].apply(lambda x: 0 if pd.isna(x) else 1)
+
+    # 2. Data Cleaning: Drop rows where key features are missing
+    model_df.dropna(subset=['Age', 'Height', 'Weight', 'region', 'Sport', 'Sex'], inplace=True)
+
+    # Get unique lists for the UI dropdowns
+    sports_list = model_df['Sport'].unique().tolist()
+    sports_list.sort()
+    region_list = model_df['region'].unique().tolist()
+    region_list.sort()
+
+    # 3. Define Features (X) and Target (y)
+    # We select the features that are good predictors
+    features = ['Age', 'Height', 'Weight', 'Sex', 'Sport', 'region']
+    X = model_df[features]
+    y = model_df['Medal_Won']
+
+    # 4. Create Preprocessing Pipeline
+    # Define which features are numeric and which are categorical
+    numeric_features = ['Age', 'Height', 'Weight']
+    categorical_features = ['Sex', 'Sport', 'region']
+
+    # Create a transformer for numeric features (scaling)
+    numeric_transformer = StandardScaler()
+
+    # Create a transformer for categorical features (one-hot encoding)
+    # handle_unknown='ignore' prevents errors if new/unseen data is passed
+    categorical_transformer = OneHotEncoder(handle_unknown='ignore')
+
+    # Use ColumnTransformer to apply different transformers to different columns
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numeric_features),
+            ('cat', categorical_transformer, categorical_features)
+        ])
+
+    # 5. Create and Train the Final Model Pipeline
+    # We chain the preprocessor and the classifier (Logistic Regression)
+    # class_weight='balanced' is CRITICAL for this imbalanced dataset (way more non-winners than winners)
+    # max_iter=1000 ensures the model converges
+    pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                               ('classifier', LogisticRegression(max_iter=1000, class_weight='balanced'))
+                               ])
+
+    # Train the model on the entire available dataset
+    pipeline.fit(X, y)
+
+    return pipeline, sports_list, region_list

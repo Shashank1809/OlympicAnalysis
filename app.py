@@ -7,15 +7,40 @@ import seaborn as sns
 import plotly.figure_factory as ff
 from helper import medal_tally
 
-df = pd.read_csv('athlete_events.csv')
-region_df = pd.read_csv('noc_regions.csv')
+# df = pd.read_csv('athlete_events.csv')
+# region_df = pd.read_csv('noc_regions.csv')
+#
+# df = preprocessor.preprocess(df, region_df)
 
-df = preprocessor.preprocess(df, region_df)
+# --- Modify the data loading and add model caching ---
+@st.cache_data
+def load_data():
+    df = pd.read_csv('athlete_events.csv')
+    region_df = pd.read_csv('noc_regions.csv')
+    df = preprocessor.preprocess(df, region_df)
+    return df
+
+df = load_data()
+#end
+
+
+# --- ADD THIS NEW SECTION ---
+# Cache the trained model and feature lists
+# Use @st.cache_resource for non-data objects like models
+@st.cache_resource
+def get_model_and_lists():
+    pipeline, sports_list, region_list = helper.train_prediction_model(df)
+    return pipeline, sports_list, region_list
+
+# Load the model once
+pipeline, sports_list, region_list = get_model_and_lists()
+# --- END OF NEW SECTION ---
+
 
 st.sidebar.title("Olympics Analysis")
 user_menu = st.sidebar.radio(
     'Select option',
-    ('Medal Tally','Overall Analysis','Country-wise Analytics','Athlete-wise Analysis','Country Comparison')
+    ('Medal Tally','Overall Analysis','Country-wise Analytics','Athlete-wise Analysis','Country Comparison','Medal Predictor')
 )
 
 if user_menu == 'Medal Tally':
@@ -204,6 +229,34 @@ if user_menu == 'Athlete-wise Analysis':
     fig = px.line(final,x="Year",y=["Male","Female"])
     st.plotly_chart(fig)
 
+# if user_menu == 'Country Comparison':
+#     st.sidebar.title('Country Comparison')
+#
+#     country_list = df['region'].dropna().unique().tolist()
+#     country_list.sort()
+#
+#     st.title("Head-to-Head Country Medal Comparison")
+#
+#     country1 = st.sidebar.selectbox("Select Country 1", country_list)
+#     country2 = st.sidebar.selectbox("Select Country 2", country_list)
+#
+#     if country1 and country2:
+#         if country1 == country2:
+#             st.warning("Please select two different countries.")
+#         else:
+#             comparison_df = helper.country_comparison_data(df, country1, country2)
+#
+#             # Ensure both countries are in the columns, even if one has 0 medals overall
+#             if country1 not in comparison_df.columns:
+#                 comparison_df[country1] = 0
+#             if country2 not in comparison_df.columns:
+#                 comparison_df[country2] = 0
+#
+#             fig = px.line(comparison_df, x=comparison_df.index, y=[country1, country2],
+#                           title=f"Medal Tally Comparison: {country1} vs {country2}",
+#                           labels={'value': 'Number of Medals', 'Year': 'Olympic Year'})
+#             st.plotly_chart(fig)
+
 if user_menu == 'Country Comparison':
     st.sidebar.title('Country Comparison')
 
@@ -212,22 +265,139 @@ if user_menu == 'Country Comparison':
 
     st.title("Head-to-Head Country Medal Comparison")
 
-    country1 = st.sidebar.selectbox("Select Country 1", country_list)
-    country2 = st.sidebar.selectbox("Select Country 2", country_list)
+    # Set default indices for a richer user experience
+    # (Finds the index for 'USA' and 'China', defaults to 0 if not found)
+    default_c1_index = country_list.index("USA") if "USA" in country_list else 0
+    default_c2_index = country_list.index("China") if "China" in country_list else 1
+
+    country1 = st.sidebar.selectbox("Select Country 1", country_list, index=default_c1_index)
+    country2 = st.sidebar.selectbox("Select Country 2", country_list, index=default_c2_index)
 
     if country1 and country2:
         if country1 == country2:
             st.warning("Please select two different countries.")
         else:
+            # --- PLOT 1: Original Line Chart (Medal Tally Over Time) ---
+            st.header(f"Medal Tally Over Time: {country1} vs {country2}")
             comparison_df = helper.country_comparison_data(df, country1, country2)
 
-            # Ensure both countries are in the columns, even if one has 0 medals overall
+            # Ensure both countries are columns even if one has 0 medals
             if country1 not in comparison_df.columns:
                 comparison_df[country1] = 0
             if country2 not in comparison_df.columns:
                 comparison_df[country2] = 0
 
-            fig = px.line(comparison_df, x=comparison_df.index, y=[country1, country2],
-                          title=f"Medal Tally Comparison: {country1} vs {country2}",
-                          labels={'value': 'Number of Medals', 'Year': 'Olympic Year'})
-            st.plotly_chart(fig)
+            fig_line = px.line(comparison_df, x=comparison_df.index, y=[country1, country2],
+                               title=f"Total Medals Comparison: {country1} vs {country2}",
+                               labels={'value': 'Number of Medals', 'Year': 'Olympic Year'})
+            st.plotly_chart(fig_line, use_container_width=True)
+
+            # --- PLOT 2: NEW (Overall Medal Breakdown) ---
+            st.header(f"Overall Medal Breakdown: {country1} vs {country2}")
+            breakdown_df = helper.country_medal_breakdown(df, country1, country2)
+            fig_breakdown = px.bar(breakdown_df, x='region', y='Count', color='Medal',
+                                   barmode='group',
+                                   title=f"Total Medal Count (Gold, Silver, Bronze)",
+                                   labels={'region': 'Country', 'Count': 'Total Medals'},
+                                   color_discrete_map={'Gold': 'gold', 'Silver': 'silver', 'Bronze': '#cd7f32'})
+            st.plotly_chart(fig_breakdown, use_container_width=True)
+
+            # --- PLOT 3: NEW (Medals by Gender) ---
+            st.header(f"Medal Winners by Gender: {country1} vs {country2}")
+            gender_df = helper.country_gender_medals(df, country1, country2)
+            fig_gender = px.bar(gender_df, x='region', y='Medal', color='Sex',
+                                barmode='group',
+                                title=f"Medals Won by Men vs. Women",
+                                labels={'region': 'Country', 'Medal': 'Number of Medals'})
+            st.plotly_chart(fig_gender, use_container_width=True)
+
+            # --- PLOT 4: NEW (Top Sports Comparison) ---
+            st.header(f"Top Sports Comparison: {country1} vs {country2}")
+            st.info("This chart shows the medal count for any sport where *either* country ranks in their own top 10.")
+            sports_df = helper.country_top_sports(df, country1, country2)
+
+            if sports_df.empty:
+                st.warning(f"No common or top sports data found for {country1} and {country2}.")
+            else:
+                fig_sports = px.bar(sports_df, y='Sport', x='Medal', color='region',
+                                    barmode='group',
+                                    orientation='h',
+                                    title=f"Medal Comparison in Top Sports",
+                                    labels={'Medal': 'Number of Medals', 'Sport': 'Sport'},
+                                    height=len(sports_df['Sport'].unique()) * 40)  # Dynamically set height
+                st.plotly_chart(fig_sports, use_container_width=True)
+
+
+
+# --- ADD THIS ENTIRE NEW BLOCK at the end of app.py ---
+if user_menu == 'Medal Predictor':
+    st.title("Medal Win Predictor 🥇")
+    st.markdown("""
+    This tool uses a Logistic Regression model to predict the probability of an athlete winning *any* medal
+    (Gold, Silver, or Bronze) based on their attributes and sport.
+
+    The model was trained on all athlete-event entries from 1896-2016.
+    """)
+
+    # Create columns for a cleaner layout
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Athlete Attributes")
+        selected_sex = st.selectbox("Select Sex", ('M', 'F'))
+        selected_age = st.number_input("Enter Age", 10, 97, 25)  # min, max, default
+        selected_height = st.number_input("Enter Height (cm)", 120, 230, 175)
+        selected_weight = st.number_input("Enter Weight (kg)", 25, 220, 70)
+
+    with col2:
+        st.subheader("Event & Country")
+        # Use the lists generated by the helper function
+        selected_sport = st.selectbox("Select Sport", sports_list)
+        selected_region = st.selectbox("Select Country (region)", region_list)
+
+    # Button to trigger the prediction
+    if st.button("Predict Medal Probability", use_container_width=True, type="primary"):
+        # Create a single-row DataFrame from the user's inputs
+        # The column names MUST match those used during training
+        input_data = pd.DataFrame({
+            'Age': [selected_age],
+            'Height': [selected_height],
+            'Weight': [selected_weight],
+            'Sex': [selected_sex],
+            'Sport': [selected_sport],
+            'region': [selected_region]
+        })
+
+        # Use the pipeline to predict probabilities
+        # pipeline.predict_proba returns a 2D array: [[prob_class_0, prob_class_1]]
+        probability = pipeline.predict_proba(input_data)[0]
+
+        # probability[0] is the probability of 'No Medal' (class 0)
+        # probability[1] is the probability of 'Medal Won' (class 1)
+        medal_prob = probability[1]
+
+        st.subheader("Prediction Result")
+
+        # Display the result using st.metric for a nice visual
+        st.metric(label="Probability of Winning a Medal", value=f"{medal_prob * 100:.2f}%")
+
+        # Give a qualitative interpretation
+        if medal_prob > 0.6:
+            st.success("This athlete has a very high probability of winning a medal!")
+        elif medal_prob > 0.35:
+            st.warning("This athlete has an outside chance of winning a medal.")
+        else:
+            st.error("This athlete is unlikely to win a medal based on historical data.")
+
+        # Add an expander to show more details
+        with st.expander("Show Model Details"):
+            st.write(f"Probability of **No Medal**: `{probability[0] * 100:.2f}%`")
+            st.write(f"Probability of **Medal Won**: `{probability[1] * 100:.2f}%`")
+            st.write("""
+            **Model:** `LogisticRegression`
+
+            **Features Used:** `Age`, `Height`, `Weight`, `Sex`, `Sport`, `region`
+
+            **Note:** This model is trained on a historically imbalanced dataset (most entries are non-medal winners).
+            We use `class_weight='balanced'` to compensate for this.
+            """)
