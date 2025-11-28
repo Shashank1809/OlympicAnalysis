@@ -5,6 +5,7 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 
 def fetch_medal_tally(df, year, country):
     medal_df = df.drop_duplicates(subset=['Team', 'NOC', 'Games', 'Year', 'City', 'Sport', 'Event', 'Medal'])
@@ -63,11 +64,15 @@ def most_successful(df, sport,top_n=15):
     x.rename(columns={'count':'Medals','region':'Country'},inplace = True)
     return x
 
-def yearwise_medal_tally(df,country):
+def yearwise_medal_tally(df,country,sport='Overall'):
     temp_df = df.dropna(subset = ['Medal'])
     temp_df.drop_duplicates(subset=['Team','NOC','Games','Year','City','Sport','Event','Medal'],inplace=True)
 
     new_df = temp_df[temp_df['region'] == country]
+    # --- ADD THIS LOGIC ---
+    if sport != 'Overall':
+        new_df = new_df[new_df['Sport'] == sport]
+    # --- END OF NEW LOGIC ---
     final_df = new_df.groupby('Year').count()['Medal'].reset_index()
 
     return final_df
@@ -81,14 +86,30 @@ def country_event_heatmap(df,country):
     pt = new_df.pivot_table(index='Sport', columns='Year', values='Medal', aggfunc='count').fillna(0)
     return pt
 
-def most_successful_countrywise(df, country,top_n=10):
+def most_successful_countrywise(df, country,sport='Overall',top_n=10):
     temp_df = df.dropna(subset = ['Medal'])
 
     temp_df = temp_df[temp_df['region'] == country]
 
+    # --- ADD THIS LOGIC ---
+    if sport != 'Overall':
+        temp_df = temp_df[temp_df['Sport'] == sport]
+    # --- END OF NEW LOGIC ---
+
     x = temp_df['Name'].value_counts().reset_index().head(top_n).merge(df,left_on='Name',right_on='Name',how='left')[['Name','count','Sport']].drop_duplicates('Name')
     x.rename(columns={'count':'Medals'},inplace = True)
     return x
+
+def country_sport_event_heatmap(df, country, sport):
+    temp_df = df.dropna(subset=['Medal'])
+    temp_df.drop_duplicates(subset=['Team', 'NOC', 'Games', 'Year', 'City', 'Sport', 'Event', 'Medal'], inplace=True)
+
+    # Filter for country and the selected sport
+    new_df = temp_df[(temp_df['region'] == country) & (temp_df['Sport'] == sport)]
+
+    # Pivot on Event (rows) and Year (columns)
+    pt = new_df.pivot_table(index='Event', columns='Year', values='Medal', aggfunc='count').fillna(0).astype(int)
+    return pt
 
 def weight_v_height(df,sport):
     athlete_df = df.drop_duplicates(subset = ['Name','region'])
@@ -99,15 +120,31 @@ def weight_v_height(df,sport):
     else:
         return athlete_df
 
-def men_vs_women(df):
+def men_vs_women(df, sport='Overall'):
     athlete_df = df.drop_duplicates(subset=['Name', 'region'])
+
+    # Filter by sport if it's not 'Overall'
+    if sport != 'Overall':
+        athlete_df = athlete_df[athlete_df['Sport'] == sport]
+    # --- END OF NEW LOGIC ---
+
+    # Check if df is empty after filtering
+    if athlete_df.empty:
+        return pd.DataFrame(columns=['Year', 'Male', 'Female'])
 
     men = athlete_df[athlete_df['Sex'] == 'M'].groupby('Year').count()['Name'].reset_index()
     women = athlete_df[athlete_df['Sex'] == 'F'].groupby('Year').count()['Name'].reset_index()
 
-    final = men.merge(women,on='Year',how='left')
+    # Use an outer merge to handle years where only one gender participated
+    final = men.merge(women,on='Year',how='outer')
     final.rename(columns={'Name_x':'Male','Name_y':'Female'},inplace=True)
+
+
     final.fillna(0, inplace=True)
+    final['Male'] = final['Male'].astype(int)
+    final['Female'] = final['Female'].astype(int)
+
+    final = final.sort_values(by='Year')
 
     return final
 
@@ -122,12 +159,9 @@ def country_comparison_data(df, country1, country2):
     return comparison_df
 
 
-# --- Add these new functions to helper.py ---
-
 def country_medal_breakdown(df, country1, country2):
-    """
-    Prepares data for the G/S/B medal breakdown grouped bar chart.
-    """
+
+    #Prepares data for the G/S/B medal breakdown grouped bar chart.
     # We use the main df which has one-hot encoded medals
     temp_df = df[df['region'].isin([country1, country2])]
 
@@ -141,9 +175,8 @@ def country_medal_breakdown(df, country1, country2):
 
 
 def country_gender_medals(df, country1, country2):
-    """
-    Prepares data for the gender-based medal comparison bar chart.
-    """
+
+    #Prepares data for the gender-based medal comparison bar chart.
     temp_df = df[df['region'].isin([country1, country2])]
 
     # Filter for rows that actually have a medal
@@ -155,9 +188,8 @@ def country_gender_medals(df, country1, country2):
 
 
 def country_top_sports(df, country1, country2):
-    """
-    Prepares data for the top sports comparison horizontal bar chart.
-    """
+
+    #Prepares data for the top sports comparison horizontal bar chart.
     temp_df = df[df['region'].isin([country1, country2])]
     temp_df = temp_df.dropna(subset=['Medal'])
 
@@ -226,8 +258,16 @@ def train_prediction_model(df):
     # We chain the preprocessor and the classifier (Logistic Regression)
     # class_weight='balanced' is CRITICAL for this imbalanced dataset (way more non-winners than winners)
     # max_iter=1000 ensures the model converges
+
+    # model = LogisticRegression(max_iter=1000, class_weight='balanced')
+    model = RandomForestClassifier(
+        n_estimators=100,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1
+    )
     pipeline = Pipeline(steps=[('preprocessor', preprocessor),
-                               ('classifier', LogisticRegression(max_iter=1000, class_weight='balanced'))
+                               ('classifier', model)
                                ])
 
     # Train the model on the entire available dataset

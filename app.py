@@ -24,7 +24,6 @@ df = load_data()
 #end
 
 
-# --- ADD THIS NEW SECTION ---
 # Cache the trained model and feature lists
 # Use @st.cache_resource for non-data objects like models
 @st.cache_resource
@@ -32,7 +31,6 @@ def get_model_and_lists():
     pipeline, sports_list, region_list = helper.train_prediction_model(df)
     return pipeline, sports_list, region_list
 
-# Load the model once
 pipeline, sports_list, region_list = get_model_and_lists()
 # --- END OF NEW SECTION ---
 
@@ -144,23 +142,80 @@ if user_menu == 'Country-wise Analytics':
     country_list = df['region'].dropna().unique().tolist()
     country_list.sort()
 
+    sport_list = df['Sport'].unique().tolist()
+    sport_list.sort()
+    sport_list.insert(0, 'Overall')
+
     selected_country = st.sidebar.selectbox("Select Country", country_list)
+    selected_sport = st.sidebar.selectbox("Select Sport", sport_list, key='country_sport_select')
 
-    country_df = helper.yearwise_medal_tally(df,selected_country)
-    fig = px.line(country_df, x="Year", y="Medal")
-    st.title(selected_country + " Medal Tally Over the Years")
-    st.plotly_chart(fig)
+    country_df = helper.yearwise_medal_tally(df,selected_country,selected_sport)
 
-    st.title(selected_country + " excels in the following Sports")
-    pt = helper.country_event_heatmap(df,selected_country)
-    fig, ax = plt.subplots(figsize = (20,20))
-    ax = sns.heatmap(pt,annot=True)
-    st.pyplot(fig)
+    if selected_sport == 'Overall':
+        title_text = f"{selected_country} Medal Tally Over the Years"
+    else:
+        title_text = f"{selected_country} Medal Tally in {selected_sport} Over the Years"
 
-    st.title("Top athletes of "+selected_country)
+    st.title(title_text)
+
+    if country_df.empty:
+        st.warning(f"No medals found for {selected_country} in {selected_sport}.")
+    else:
+        fig = px.line(country_df, x="Year", y="Medal")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # fig = px.line(country_df, x="Year", y="Medal")
+    # st.title(selected_country + " Medal Tally Over the Years")
+    # st.plotly_chart(fig)
+
+    # st.title(selected_country + " excels in the following Sports")
+    # pt = helper.country_event_heatmap(df,selected_country)
+    # fig, ax = plt.subplots(figsize = (20,20))
+    # ax = sns.heatmap(pt,annot=True)
+    # st.pyplot(fig)
+    #
+    # st.title("Top athletes of "+selected_country)
+    # top_n_country = st.sidebar.slider('Select Number of Athletes', 5, 15, 10, key='country_slider')
+    # top10_df = helper.most_successful_countrywise(df,selected_country,top_n_country)
+    # st.table(top10_df)
+
+    # --- 2. Heatmap (Conditional) ---
+    if selected_sport == 'Overall':
+        st.title(selected_country + " excels in the following Sports")
+        pt = helper.country_event_heatmap(df, selected_country)
+        fig, ax = plt.subplots(figsize=(20, 20))
+        ax = sns.heatmap(pt, annot=True)
+        st.pyplot(fig)
+    else:
+        st.title(f"{selected_country}'s performance in {selected_sport} Events")
+        pt = helper.country_sport_event_heatmap(df, selected_country, selected_sport)
+
+        if pt.empty:
+            st.warning(f"No event data found for {selected_country} in {selected_sport}.")
+        else:
+            fig, ax = plt.subplots(figsize=(20, pt.shape[0] * 0.5))  # Dynamic height
+            ax = sns.heatmap(pt, annot=True)
+            st.pyplot(fig)
+
+    # --- 3. Top Athletes Table (Filtered) ---
+    if selected_sport == 'Overall':
+        st.title(f"Top Athletes of {selected_country}")
+    else:
+        st.title(f"Top Athletes of {selected_country} in {selected_sport}")
+
+    # Get the slider value (from previous suggestion)
     top_n_country = st.sidebar.slider('Select Number of Athletes', 5, 15, 10, key='country_slider')
-    top10_df = helper.most_successful_countrywise(df,selected_country,top_n_country)
-    st.table(top10_df)
+
+    top_df = helper.most_successful_countrywise(df, selected_country, selected_sport, top_n_country)
+
+    if top_df.empty:
+        st.warning(f"No athletes found for {selected_country} in {selected_sport}.")
+    else:
+        st.table(top_df)
+
+
+
+
 
 if user_menu == 'Athlete-wise Analysis':
     athlete_df = df.drop_duplicates(subset=['Name','region'])
@@ -217,17 +272,123 @@ if user_menu == 'Athlete-wise Analysis':
     sport_list.sort()
     sport_list.insert(0, 'Overall')
 
-    st.title('Height VS Weight')
-    selected_sport = st.selectbox("Select Sport", sport_list)
-    temp_df = helper.weight_v_height(df,selected_sport)
-    fig,ax = plt.subplots()
-    ax = sns.scatterplot(x=temp_df['Weight'], y=temp_df['Height'],hue = temp_df['Medal'],style=temp_df['Sex'])
-    st.pyplot(fig)
+    # st.title('Height VS Weight')
+    # selected_sport = st.selectbox("Select Sport", sport_list)
+    # temp_df = helper.weight_v_height(df,selected_sport)
+    # fig,ax = plt.subplots()
+    # ax = sns.scatterplot(x=temp_df['Weight'], y=temp_df['Height'],hue = temp_df['Medal'],style=temp_df['Sex'])
+    # st.pyplot(fig)
+
+    # --- START: REPLACEMENT for 'Height VS Weight' plot ---
+    st.title('Height VS Weight Interactive Analysis')
+
+    # This definition should already be here from your previous code
+    sport_list = df['Sport'].unique().tolist()
+    sport_list.sort()
+    sport_list.insert(0, 'Overall')
+
+    selected_sport_hw = st.selectbox("Select Sport", sport_list, key='hw_sport_select')
+
+    # Get the filtered data from the helper
+    temp_df = helper.weight_v_height(df, selected_sport_hw)
+
+    st.header(f"Height vs Weight for: {selected_sport_hw}")
+
+    # Check if data exists
+    if temp_df.empty or temp_df[['Weight', 'Height']].dropna().empty:
+        st.warning(f"No data available for {selected_sport_hw} with both Height and Weight.")
+    else:
+        # Create the new Plotly Express scatter plot
+        fig = px.scatter(temp_df,
+                         x='Weight',
+                         y='Height',
+                         color='Medal',  # Replaces Seaborn's 'hue'
+                         symbol='Sex',  # Replaces Seaborn's 'style'
+                         hover_name='Name',  # <-- This is the key: show name on hover
+                         hover_data=['region', 'Age'],  # Show extra details
+                         title=f"Height vs Weight Distribution for {selected_sport_hw}",
+
+                         # --- Optional: Make 'No Medal' points fade to the background ---
+                         color_discrete_map={
+                             'Gold': 'gold',
+                             'Silver': 'silver',
+                             'Bronze': '#cd7f32',
+                             'No Medal': 'rgba(200, 200, 200, 0.3)'  # Light grey and semi-transparent
+                         }
+                         )
+
+        # Make the plot larger
+        fig.update_layout(autosize=False, width=1000, height=700)
+
+        # Display the interactive plot
+        st.plotly_chart(fig)
+
+    # --- END OF REPLACEMENT ---
+
+    # # --- START: REPLACEMENT for 'Height VS Weight' plot ---
+    # st.title('Height VS Weight Density Analysis')
+    #
+    # # This definition should already be here from your previous code
+    # sport_list = df['Sport'].unique().tolist()
+    # sport_list.sort()
+    # sport_list.insert(0, 'Overall')
+    #
+    # selected_sport_hw = st.selectbox("Select Sport", sport_list, key='hw_sport_select')
+    #
+    # # Get the filtered data from the helper
+    # temp_df = helper.weight_v_height(df, selected_sport_hw)
+    #
+    # st.header(f"Height vs Weight Density for: {selected_sport_hw}")
+    #
+    # # Check if data exists
+    # if temp_df.empty or temp_df[['Weight', 'Height']].dropna().empty:
+    #     st.warning(f"No data available for {selected_sport_hw} with both Height and Weight.")
+    # else:
+    #     # --- NEW GRAPH: 2D Density Heatmap ---
+    #     fig = px.density_heatmap(
+    #         temp_df.dropna(subset=['Weight', 'Height']),  # Drop rows with no H/W data
+    #         x='Weight',
+    #         y='Height',
+    #         nbinsx=30,  # Number of bins on the x-axis
+    #         nbinsy=30,  # Number of bins on the y-axis
+    #         color_continuous_scale="Viridis",  # A nice color scale
+    #         title=f"Density of Athletes by Height and Weight ({selected_sport_hw})",
+    #         labels={'x': 'Weight (kg)', 'y': 'Height (cm)'}
+    #     )
+    #
+    #     # Add hover data to show the count in each bin
+    #     fig.update_traces(hovertemplate='Weight: %{x} kg<br>Height: %{y} cm<br>Count: %{z}')
+    #
+    #     # Make the plot larger
+    #     fig.update_layout(autosize=False, width=1000, height=700)
+    #
+    #     # Display the interactive plot
+    #     st.plotly_chart(fig)
+    #
+    # # --- END OF REPLACEMENT ---
+
+
 
     st.title("Men vs Women participation over the Years")
-    final = helper.men_vs_women(df)
-    fig = px.line(final,x="Year",y=["Male","Female"])
-    st.plotly_chart(fig)
+
+    # Add the dynamic selectbox
+    selected_sport_mw = st.selectbox("Select Sport to Analyze", sport_list, key='mw_sport_select')
+    final = helper.men_vs_women(df, selected_sport_mw)
+    # Make the header dynamic
+    if selected_sport_mw != 'Overall':
+        st.header(f"Participation in {selected_sport_mw}")
+    else:
+        st.header("Overall Participation")
+    # final = helper.men_vs_women(df)
+    # Check for empty data to avoid errors
+    if final.empty:
+        st.warning(f"No participation data found for {selected_sport_mw}.")
+    else:
+        fig = px.line(final, x="Year", y=["Male", "Female"])
+        fig.update_layout(autosize=False, width=1000, height=600)
+        st.plotly_chart(fig)
+    # fig = px.line(final,x="Year",y=["Male","Female"])
+    # st.plotly_chart(fig)
 
 # if user_menu == 'Country Comparison':
 #     st.sidebar.title('Country Comparison')
@@ -329,7 +490,6 @@ if user_menu == 'Country Comparison':
 
 
 
-# --- ADD THIS ENTIRE NEW BLOCK at the end of app.py ---
 if user_menu == 'Medal Predictor':
     st.title("Medal Win Predictor 🥇")
     st.markdown("""
@@ -389,12 +549,12 @@ if user_menu == 'Medal Predictor':
         else:
             st.error("This athlete is unlikely to win a medal based on historical data.")
 
-        # Add an expander to show more details
+        # Added an expander to show more details
         with st.expander("Show Model Details"):
             st.write(f"Probability of **No Medal**: `{probability[0] * 100:.2f}%`")
             st.write(f"Probability of **Medal Won**: `{probability[1] * 100:.2f}%`")
             st.write("""
-            **Model:** `LogisticRegression`
+            **Model:** `Random Forest Classifier`
 
             **Features Used:** `Age`, `Height`, `Weight`, `Sex`, `Sport`, `region`
 
